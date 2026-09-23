@@ -1,17 +1,20 @@
-from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
-
-MODEL_NAME = "sshleifer/distilbart-cnn-12-6"
-
-tokenizer = None
-model = None
+import re
+from sklearn.feature_extraction.text import TfidfVectorizer
 
 
-def load_model():
-    global tokenizer, model
+def split_sentences(text):
+    text = re.sub(r"\s+", " ", text).strip()
 
-    if tokenizer is None or model is None:
-        tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
-        model = AutoModelForSeq2SeqLM.from_pretrained(MODEL_NAME)
+    if not text:
+        return []
+
+    sentences = re.split(r"(?<=[.!?])\s+", text)
+
+    return [
+        sentence.strip()
+        for sentence in sentences
+        if len(sentence.strip()) > 40
+    ]
 
 
 def generate_summary(text):
@@ -19,48 +22,55 @@ def generate_summary(text):
         return "No content available for summarization."
 
     try:
-        load_model()
+        sentences = split_sentences(text)
 
-        text = text[:6000]
+        if not sentences:
+            return text[:500]
 
-        inputs = tokenizer(
-            text,
-            return_tensors="pt",
-            max_length=1024,
-            truncation=True
+        if len(sentences) <= 3:
+            return " ".join(sentences)
+
+        vectorizer = TfidfVectorizer(
+            stop_words="english",
+            max_features=5000
         )
 
-        summary_ids = model.generate(
-            inputs["input_ids"],
-            attention_mask=inputs["attention_mask"],
-            max_length=120,
-            min_length=40,
-            num_beams=4,
-            early_stopping=True
+        matrix = vectorizer.fit_transform(sentences)
+
+        scores = matrix.sum(axis=1).A1
+
+        ranked = sorted(
+            range(len(sentences)),
+            key=lambda i: scores[i],
+            reverse=True
         )
 
-        summary = tokenizer.decode(
-            summary_ids[0],
-            skip_special_tokens=True
+        sentence_count = min(3, len(sentences))
+
+        selected = sorted(
+            ranked[:sentence_count]
+        )
+
+        summary = " ".join(
+            sentences[i]
+            for i in selected
         )
 
         return summary
 
     except Exception as error:
         print(f"Summarization error: {error}")
-        return "Unable to generate summary."
+
+        return text[:500]
 
 
 if __name__ == "__main__":
-    print("Loading AI summarization model...")
-
     test_text = """
-    Four people have died following a house fire.
-    A fifth person was taken to hospital after the fire.
-    Firefighters entered the property to search for people inside.
-    Police are investigating the cause of the fire.
+    A major technology company announced a new artificial intelligence
+    product today. The company said the product will improve productivity
+    and help businesses automate common tasks. The new system is expected
+    to be available to businesses later this year.
     """
 
-    print("AI summarization model loaded!")
-    print("\nGenerated Summary:")
+    print("Generated Summary:")
     print(generate_summary(test_text))
